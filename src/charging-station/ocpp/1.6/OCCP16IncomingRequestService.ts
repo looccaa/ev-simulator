@@ -1,9 +1,10 @@
 import { ChangeAvailabilityRequest, ChangeConfigurationRequest, ClearChargingProfileRequest, GetConfigurationRequest, OCPP16AvailabilityType, OCPP16IncomingRequestCommand, RemoteStartTransactionRequest, RemoteStopTransactionRequest, ResetRequest, SetChargingProfileRequest, UnlockConnectorRequest } from '../../../types/ocpp/1.6/Requests';
-import { ChangeAvailabilityResponse, ChangeConfigurationResponse, ClearChargingProfileResponse, DefaultResponse, GetConfigurationResponse, SetChargingProfileResponse, UnlockConnectorResponse } from '../../../types/ocpp/1.6/Responses';
+import { ChangeAvailabilityResponse, ChangeConfigurationResponse, ClearChargingProfileResponse, GetConfigurationResponse, SetChargingProfileResponse, UnlockConnectorResponse } from '../../../types/ocpp/1.6/Responses';
 import { ChargingProfilePurposeType, OCPP16ChargingProfile } from '../../../types/ocpp/1.6/ChargingProfile';
 import { OCPP16AuthorizationStatus, OCPP16StopTransactionReason } from '../../../types/ocpp/1.6/Transaction';
 
 import Constants from '../../../utils/Constants';
+import { DefaultResponse } from '../../../types/ocpp/Responses';
 import { ErrorType } from '../../../types/ocpp/ErrorType';
 import { MessageType } from '../../../types/ocpp/MessageType';
 import { OCPP16ChargePointStatus } from '../../../types/ocpp/1.6/ChargePointStatus';
@@ -63,8 +64,10 @@ export default class OCPP16IncomingRequestService extends OCPPIncomingRequestSer
     }
     if (this.chargingStation.getConnector(connectorId)?.transactionStarted) {
       const transactionId = this.chargingStation.getConnector(connectorId).transactionId;
-      const stopResponse = await this.chargingStation.ocppRequestService.sendStopTransaction(transactionId, this.chargingStation.getTransactionMeterStop(transactionId),
-        this.chargingStation.getTransactionIdTag(transactionId), OCPP16StopTransactionReason.UNLOCK_COMMAND);
+      const stopResponse = await this.chargingStation.ocppRequestService.sendStopTransaction(transactionId,
+        this.chargingStation.getEnergyActiveImportRegisterByTransactionId(transactionId),
+        this.chargingStation.getTransactionIdTag(transactionId),
+        OCPP16StopTransactionReason.UNLOCK_COMMAND);
       if (stopResponse.idTagInfo?.status === OCPP16AuthorizationStatus.ACCEPTED) {
         return Constants.OCPP_RESPONSE_UNLOCKED;
       }
@@ -253,42 +256,74 @@ export default class OCPP16IncomingRequestService extends OCPPIncomingRequestSer
   }
 
   private async handleRequestRemoteStartTransaction(commandPayload: RemoteStartTransactionRequest): Promise<DefaultResponse> {
-    const transactionConnectorID: number = commandPayload.connectorId ? commandPayload.connectorId : 1;
-    if (this.chargingStation.isChargingStationAvailable() && this.chargingStation.isConnectorAvailable(transactionConnectorID)) {
-      if (this.chargingStation.getAuthorizeRemoteTxRequests() && this.chargingStation.getLocalAuthListEnabled() && this.chargingStation.hasAuthorizedTags()) {
+    const transactionConnectorId: number = commandPayload.connectorId;
+    if (transactionConnectorId) {
+      await this.chargingStation.ocppRequestService.sendStatusNotification(transactionConnectorId, OCPP16ChargePointStatus.PREPARING);
+      this.chargingStation.getConnector(transactionConnectorId).status = OCPP16ChargePointStatus.PREPARING;
+      if (this.chargingStation.isChargingStationAvailable() && this.chargingStation.isConnectorAvailable(transactionConnectorId)) {
         // Check if authorized
-        if (this.chargingStation.authorizedTags.find((value) => value === commandPayload.idTag)) {
-          await this.chargingStation.ocppRequestService.sendStatusNotification(transactionConnectorID, OCPP16ChargePointStatus.PREPARING);
-          this.chargingStation.getConnector(transactionConnectorID).status = OCPP16ChargePointStatus.PREPARING;
-          if (commandPayload.chargingProfile && commandPayload.chargingProfile.chargingProfilePurpose === ChargingProfilePurposeType.TX_PROFILE) {
-            this.chargingStation.setChargingProfile(transactionConnectorID, commandPayload.chargingProfile);
-            logger.debug(`${this.chargingStation.logPrefix()} Charging profile(s) set at start transaction, dump their stack: %j`, this.chargingStation.getConnector(transactionConnectorID).chargingProfiles);
-          } else if (commandPayload.chargingProfile && commandPayload.chargingProfile.chargingProfilePurpose !== ChargingProfilePurposeType.TX_PROFILE) {
-            return Constants.OCPP_RESPONSE_REJECTED;
+        if (this.chargingStation.getAuthorizeRemoteTxRequests()) {
+          let authorized = false;
+          if (this.chargingStation.getLocalAuthListEnabled() && this.chargingStation.hasAuthorizedTags()
+              && this.chargingStation.authorizedTags.find((value) => value === commandPayload.idTag)) {
+            authorized = true;
           }
-          // Authorization successful start transaction
-          await this.chargingStation.ocppRequestService.sendStartTransaction(transactionConnectorID, commandPayload.idTag);
-          logger.debug(this.chargingStation.logPrefix() + ' Transaction remotely STARTED on ' + this.chargingStation.stationInfo.chargingStationId + '#' + transactionConnectorID.toString() + ' for idTag ' + commandPayload.idTag);
-          return Constants.OCPP_RESPONSE_ACCEPTED;
+          if (!authorized || (authorized && this.chargingStation.getMayAuthorizeAtRemoteStart())) {
+            const authorizeResponse = await this.chargingStation.ocppRequestService.sendAuthorize(transactionConnectorId, commandPayload.idTag);
+            if (authorizeResponse?.idTagInfo?.status === OCPP16AuthorizationStatus.ACCEPTED) {
+              authorized = true;
+            } else {
+              authorized = false;
+            }
+          }
+          if (authorized) {
+            // Authorization successful, start transaction
+            if (this.setRemoteStartTransactionChargingProfile(transactionConnectorId, commandPayload.chargingProfile)) {
+              if ((await this.chargingStation.ocppRequestService.sendStartTransaction(transactionConnectorId, commandPayload.idTag)).idTagInfo.status === OCPP16AuthorizationStatus.ACCEPTED) {
+                logger.debug(this.chargingStation.logPrefix() + ' Transaction remotely STARTED on ' + this.chargingStation.stationInfo.chargingStationId + '#' + transactionConnectorId.toString() + ' for idTag ' + commandPayload.idTag);
+                return Constants.OCPP_RESPONSE_ACCEPTED;
+              }
+              return await this.notifyRemoteStartTransactionRejected(transactionConnectorId, commandPayload.idTag);
+            }
+            return await this.notifyRemoteStartTransactionRejected(transactionConnectorId, commandPayload.idTag);
+          }
+          return await this.notifyRemoteStartTransactionRejected(transactionConnectorId, commandPayload.idTag);
         }
-        logger.warn(this.chargingStation.logPrefix() + ' Remote starting transaction REJECTED on connector Id ' + transactionConnectorID.toString() + ', idTag ' + commandPayload.idTag);
-        return Constants.OCPP_RESPONSE_REJECTED;
+        // No authorization check required, start transaction
+        if (this.setRemoteStartTransactionChargingProfile(transactionConnectorId, commandPayload.chargingProfile)) {
+          if ((await this.chargingStation.ocppRequestService.sendStartTransaction(transactionConnectorId, commandPayload.idTag)).idTagInfo.status === OCPP16AuthorizationStatus.ACCEPTED) {
+            logger.debug(this.chargingStation.logPrefix() + ' Transaction remotely STARTED on ' + this.chargingStation.stationInfo.chargingStationId + '#' + transactionConnectorId.toString() + ' for idTag ' + commandPayload.idTag);
+            return Constants.OCPP_RESPONSE_ACCEPTED;
+          }
+          return await this.notifyRemoteStartTransactionRejected(transactionConnectorId, commandPayload.idTag);
+        }
+        return await this.notifyRemoteStartTransactionRejected(transactionConnectorId, commandPayload.idTag);
       }
-      await this.chargingStation.ocppRequestService.sendStatusNotification(transactionConnectorID, OCPP16ChargePointStatus.PREPARING);
-      this.chargingStation.getConnector(transactionConnectorID).status = OCPP16ChargePointStatus.PREPARING;
-      if (commandPayload.chargingProfile && commandPayload.chargingProfile.chargingProfilePurpose === ChargingProfilePurposeType.TX_PROFILE) {
-        this.chargingStation.setChargingProfile(transactionConnectorID, commandPayload.chargingProfile);
-        logger.debug(`${this.chargingStation.logPrefix()} Charging profile(s) set at start transaction, dump their stack: %j`, this.chargingStation.getConnector(commandPayload.connectorId).chargingProfiles);
-      } else if (commandPayload.chargingProfile && commandPayload.chargingProfile.chargingProfilePurpose !== ChargingProfilePurposeType.TX_PROFILE) {
-        return Constants.OCPP_RESPONSE_REJECTED;
-      }
-      // No local authorization check required => start transaction
-      await this.chargingStation.ocppRequestService.sendStartTransaction(transactionConnectorID, commandPayload.idTag);
-      logger.debug(this.chargingStation.logPrefix() + ' Transaction remotely STARTED on ' + this.chargingStation.stationInfo.chargingStationId + '#' + transactionConnectorID.toString() + ' for idTag ' + commandPayload.idTag);
-      return Constants.OCPP_RESPONSE_ACCEPTED;
+      return await this.notifyRemoteStartTransactionRejected(transactionConnectorId, commandPayload.idTag);
     }
-    logger.warn(this.chargingStation.logPrefix() + ' Remote starting transaction REJECTED on unavailable connector Id ' + transactionConnectorID.toString() + ', idTag ' + commandPayload.idTag);
+    return await this.notifyRemoteStartTransactionRejected(transactionConnectorId, commandPayload.idTag);
+  }
+
+  private async notifyRemoteStartTransactionRejected(connectorId: number, idTag: string): Promise<DefaultResponse> {
+    if (this.chargingStation.getConnector(connectorId).status !== OCPP16ChargePointStatus.AVAILABLE) {
+      await this.chargingStation.ocppRequestService.sendStatusNotification(connectorId, OCPP16ChargePointStatus.AVAILABLE);
+      this.chargingStation.getConnector(connectorId).status = OCPP16ChargePointStatus.AVAILABLE;
+    }
+    logger.warn(this.chargingStation.logPrefix() + ' Remote starting transaction REJECTED on connector Id ' + connectorId.toString() + ', idTag ' + idTag + ', availability ' + this.chargingStation.getConnector(connectorId).availability + ', status ' + this.chargingStation.getConnector(connectorId).status);
     return Constants.OCPP_RESPONSE_REJECTED;
+  }
+
+  private setRemoteStartTransactionChargingProfile(connectorId: number, cp: OCPP16ChargingProfile): boolean {
+    if (cp && cp.chargingProfilePurpose === ChargingProfilePurposeType.TX_PROFILE) {
+      this.chargingStation.setChargingProfile(connectorId, cp);
+      logger.debug(`${this.chargingStation.logPrefix()} Charging profile(s) set at remote start transaction, dump their stack: %j`, this.chargingStation.getConnector(connectorId).chargingProfiles);
+      return true;
+    } else if (cp && cp.chargingProfilePurpose !== ChargingProfilePurposeType.TX_PROFILE) {
+      logger.warn(`${this.chargingStation.logPrefix()} Not allowed to set ${cp.chargingProfilePurpose} charging profile(s) at remote start transaction`);
+      return false;
+    } else if (!cp) {
+      return true;
+    }
   }
 
   private async handleRequestRemoteStopTransaction(commandPayload: RemoteStopTransactionRequest): Promise<DefaultResponse> {
@@ -297,7 +332,7 @@ export default class OCPP16IncomingRequestService extends OCPPIncomingRequestSer
       if (Utils.convertToInt(connector) > 0 && this.chargingStation.getConnector(Utils.convertToInt(connector))?.transactionId === transactionId) {
         await this.chargingStation.ocppRequestService.sendStatusNotification(Utils.convertToInt(connector), OCPP16ChargePointStatus.FINISHING);
         this.chargingStation.getConnector(Utils.convertToInt(connector)).status = OCPP16ChargePointStatus.FINISHING;
-        await this.chargingStation.ocppRequestService.sendStopTransaction(transactionId, this.chargingStation.getTransactionMeterStop(transactionId),
+        await this.chargingStation.ocppRequestService.sendStopTransaction(transactionId, this.chargingStation.getEnergyActiveImportRegisterByTransactionId(transactionId),
           this.chargingStation.getTransactionIdTag(transactionId));
         return Constants.OCPP_RESPONSE_ACCEPTED;
       }

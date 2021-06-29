@@ -8,6 +8,7 @@ import ChargingStation from '../ChargingStation';
 import Constants from '../../utils/Constants';
 import { ErrorType } from '../../types/ocpp/ErrorType';
 import { MessageType } from '../../types/ocpp/MessageType';
+import { MeterValue } from '../../types/ocpp/MeterValues';
 import OCPPError from '../OcppError';
 import OCPPResponseService from './OCPPResponseService';
 import logger from '../../utils/Logger';
@@ -110,9 +111,11 @@ export default abstract class OCPPRequestService {
   public abstract sendHeartbeat(): Promise<void>;
   public abstract sendBootNotification(chargePointModel: string, chargePointVendor: string, chargeBoxSerialNumber?: string, firmwareVersion?: string, chargePointSerialNumber?: string, iccid?: string, imsi?: string, meterSerialNumber?: string, meterType?: string): Promise<BootNotificationResponse>;
   public abstract sendStatusNotification(connectorId: number, status: ChargePointStatus, errorCode?: ChargePointErrorCode): Promise<void>;
-  public abstract sendAuthorize(idTag?: string): Promise<AuthorizeResponse>;
+  public abstract sendAuthorize(connectorId: number, idTag?: string): Promise<AuthorizeResponse>;
   public abstract sendStartTransaction(connectorId: number, idTag?: string): Promise<StartTransactionResponse>;
   public abstract sendStopTransaction(transactionId: number, meterStop: number, idTag?: string, reason?: StopTransactionReason): Promise<StopTransactionResponse>;
   public abstract sendMeterValues(connectorId: number, transactionId: number, interval: number, self: OCPPRequestService): Promise<void>;
+  public abstract sendTransactionBeginMeterValues(connectorId: number, transactionId: number, beginMeterValue: MeterValue): Promise<void>;
+  public abstract sendTransactionEndMeterValues(connectorId: number, transactionId: number, endMeterValue: MeterValue): Promise<void>;
   public abstract sendError(messageId: string, error: OCPPError, commandName: RequestCommand | IncomingRequestCommand): Promise<unknown>;
 }

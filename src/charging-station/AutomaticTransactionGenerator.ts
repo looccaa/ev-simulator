@@ -46,7 +46,7 @@ export default class AutomaticTransactionGenerator {
       const transactionId = this.chargingStation.getConnector(Utils.convertToInt(connector)).transactionId;
       if (this.chargingStation.getConnector(Utils.convertToInt(connector)).transactionStarted) {
         logger.info(this.logPrefix(Utils.convertToInt(connector)) + ' ATG OVER. Stop transaction ' + transactionId.toString());
-        await this.chargingStation.ocppRequestService.sendStopTransaction(transactionId, this.chargingStation.getTransactionMeterStop(transactionId),
+        await this.chargingStation.ocppRequestService.sendStopTransaction(transactionId, this.chargingStation.getEnergyActiveImportRegisterByTransactionId(transactionId),
           this.chargingStation.getTransactionIdTag(transactionId), reason);
       }
     }
@@ -128,9 +128,9 @@ export default class AutomaticTransactionGenerator {
   private async startTransaction(connectorId: number, self: AutomaticTransactionGenerator): Promise<StartTransactionResponse | AuthorizeResponse> {
     if (self.chargingStation.hasAuthorizedTags()) {
       const tagId = self.chargingStation.getRandomTagId();
-      if (self.chargingStation.stationInfo.AutomaticTransactionGenerator.requireAuthorize) {
+      if (self.chargingStation.getAutomaticTransactionGeneratorRequireAuthorize()) {
         // Authorize tagId
-        const authorizeResponse = await self.chargingStation.ocppRequestService.sendAuthorize(tagId);
+        const authorizeResponse = await self.chargingStation.ocppRequestService.sendAuthorize(connectorId, tagId);
         if (authorizeResponse?.idTagInfo?.status === AuthorizationStatus.ACCEPTED) {
           logger.info(self.logPrefix(connectorId) + ' start transaction for tagID ' + tagId);
           // Start transaction
@@ -149,7 +149,7 @@ export default class AutomaticTransactionGenerator {
   // eslint-disable-next-line consistent-this
   private async stopTransaction(connectorId: number, self: AutomaticTransactionGenerator): Promise<StopTransactionResponse> {
     const transactionId = self.chargingStation.getConnector(connectorId).transactionId;
-    return await self.chargingStation.ocppRequestService.sendStopTransaction(transactionId, self.chargingStation.getTransactionMeterStop(transactionId),
+    return await self.chargingStation.ocppRequestService.sendStopTransaction(transactionId, self.chargingStation.getEnergyActiveImportRegisterByTransactionId(transactionId),
       self.chargingStation.getTransactionIdTag(transactionId));
   }
 

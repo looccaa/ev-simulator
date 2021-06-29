@@ -53,21 +53,27 @@ chargePointModel | | '' | string | charging stations model
 chargePointVendor | | '' | string | charging stations vendor
 chargeBoxSerialNumberPrefix | | '' | string | charging stations serial number prefix
 firmwareVersion | | '' | string | charging stations firmware version
-power | | | integer\|integer[] | charging stations maximum power value(s)
+power | | | float\|float[] | charging stations maximum power value(s)
 powerSharedByConnectors | true/false | false | boolean | charging stations power shared by its connectors
 powerUnit | W/kW | W | string | charging stations power unit
 currentOutType | AC/DC | AC | string | charging stations current out type
+voltageOut | | AC:230/DC:400 | integer | charging stations voltage out
 numberOfPhases | 0/1/3 | AC:3/DC:0 | integer | charging stations number of phase(s) 
 numberOfConnectors | | | integer\|integer[] | charging stations number of connector(s)
 useConnectorId0 | true/false | true | boolean | use connector id 0 definition from the template
 randomConnectors | true/false | false | boolean | randomize runtime connector id affectation from the connector id definition in template
 resetTime | | 60 | integer | seconds to wait before the charging stations come back at reset
-connectionTimeout | | 30 | integer | connection timeout to the OCPP-J server
 autoReconnectMaxRetries | | -1 (unlimited) | integer | connection retries to the OCPP-J server
 reconnectExponentialDelay | true/false | false | boolean | connection delay retry to the OCPP-J server
 registrationMaxRetries | | -1 (unlimited) | integer | charging stations boot notification retries
-enableStatistics | true/false | true | boolean | enable charging stations statistics   
-voltageOut | | AC:230/DC:400 | integer | charging stations voltage out
+enableStatistics | true/false | true | boolean | enable charging stations statistics
+mayAuthorizeAtRemoteStart | true/false | true | boolean | always send authorize at remote start transaction when AuthorizeRemoteTxRequests is enabled
+beginEndMeterValues | true/false | false | boolean | enable Transaction.{Begin,End} MeterValues
+outOfOrderEndMeterValues | true/false | false | boolean | send Transaction.End MeterValues out of order
+meteringPerTransaction | true/false | true | boolean | enable metering history on a per transaction basis
+transactionDataMeterValues | true/false | false | boolean | enable transaction data MeterValues at stop transaction
+mainVoltageMeterValues | true/false | true | boolean | include charging station main voltage MeterValues on three phased charging stations
+phaseLineToLineVoltageMeterValues | true/false | true | boolean | include charging station line to line voltage MeterValues on three phased charging stations
 Configuration | | | ChargingStationConfiguration | charging stations OCPP configuration parameters
 AutomaticTransactionGenerator | | | AutomaticTransactionGenerator | charging stations ATG configuration
 Connectors | | | Connectors | charging stations connectors configuration
@@ -110,7 +116,7 @@ Connectors | | | Connectors | charging stations connectors configuration
     "probabilityOfStart": 1,
     "stopAfterHours": 0.3,
     "stopOnConnectionFailure": true,
-    "requireAuthorize": false
+    "requireAuthorize": true
   }
 ```
 #### Connectors section
@@ -121,6 +127,14 @@ Connectors | | | Connectors | charging stations connectors configuration
     "1": {
       "bootStatus": "Available",
       "MeterValues": [
+        ...
+        {
+          "unit": "W",
+          "measurand": "Power.Active.Import",
+          "phase": "L1-N",
+          "value": "5000",
+          "fluctuationPercent": "10"
+        },
         ...
         {
           "unit": "A",
@@ -158,7 +172,7 @@ make SUBMODULES_INIT=false
 
 ### Version 1.6
 
-### Core Profile
+#### Core Profile
 
 - :white_check_mark: Authorize
 - :white_check_mark: BootNotification
@@ -177,32 +191,88 @@ make SUBMODULES_INIT=false
 - :white_check_mark: StopTransaction
 - :white_check_mark: UnlockConnector
 
-### Firmware Management Profile
+#### Firmware Management Profile
 
 - :x: GetDiagnostics
 - :x: DiagnosticsStatusNotification
 - :x: FirmwareStatusNotification
 - :x: UpdateFirmware
 
-### Local Auth List Management Profile
+#### Local Auth List Management Profile
 
 - :x: GetLocalListVersion
 - :x: SendLocalList
 
-### Reservation Profile
+#### Reservation Profile
 
 - :x: CancelReservation
 - :x: ReserveNow
 
-### Smart Charging Profile
+#### Smart Charging Profile
 
 - :white_check_mark: ClearChargingProfile
 - :white_check_mark: GetCompositeSchedule
 - :white_check_mark: SetChargingProfile
 
-### Remote Trigger Profile
+#### Remote Trigger Profile
 
 - :x: TriggerMessage
+
+## OCPP-J standard parameters supported
+
+All kind of OCPP parameters are supported in a charging station template. The list here mention the standard ones also handled automatically in the simulator. 
+
+### Version 1.6
+
+#### Core Profile
+
+- :white_check_mark: AuthorizeRemoteTxRequests (type: boolean) (units: -)
+- :x: ClockAlignedDataInterval (type: integer) (units: seconds)
+- :white_check_mark: ConnectionTimeOut (type: integer) (units: seconds)
+- :x: GetConfigurationMaxKeys (type: integer) (units: -)
+- :white_check_mark: HeartbeatInterval (type: integer) (units: seconds)
+- :x: LocalAuthorizeOffline (type: boolean) (units: -)
+- :x: LocalPreAuthorize (type: boolean) (units: -)
+- :x: MeterValuesAlignedData (type: CSL) (units: -)
+- :white_check_mark: MeterValuesSampledData (type: CSL) (units: -)
+- :white_check_mark: MeterValueSampleInterval (type: integer) (units: seconds)
+- :white_check_mark: NumberOfConnectors (type: integer) (units: -)
+- :x: ResetRetries (type: integer) (units: times)
+- :white_check_mark: ConnectorPhaseRotation (type: CSL) (units: -)
+- :x: StopTransactionOnEVSideDisconnect (type: boolean) (units: -)
+- :x: StopTransactionOnInvalidId (type: boolean) (units: -)
+- :x: StopTxnAlignedData (type: CSL) (units: -)
+- :x: StopTxnSampledData (type: CSL) (units: -)
+- :white_check_mark: SupportedFeatureProfiles (type: CSL) (units: -)
+- :x: TransactionMessageAttempts (type: integer) (units: times)
+- :x: TransactionMessageRetryInterval (type: integer) (units: seconds)
+- :x: UnlockConnectorOnEVSideDisconnect (type: boolean) (units: -)
+- :white_check_mark: WebSocketPingInterval (type: integer) (units: seconds)
+
+#### Firmware Management Profile
+
+- *none*
+
+#### Local Auth List Management Profile
+
+- :white_check_mark: LocalAuthListEnabled (type: boolean) (units: -)
+- :x: LocalAuthListMaxLength (type: integer) (units: -)
+- :x: SendLocalListMaxLength (type: integer) (units: -)
+
+#### Reservation Profile
+
+- *none*
+
+#### Smart Charging Profile
+
+- :x: ChargeProfileMaxStackLevel (type: integer) (units: -)
+- :x: ChargingScheduleAllowedChargingRateUnit (type: CSL) (units: -)
+- :x: ChargingScheduleMaxPeriods (type: integer) (units: -)
+- :x: MaxChargingProfilesInstalled (type: integer) (units: -)
+
+#### Remote Trigger Profile
+
+- *none*
 
 ## License
 

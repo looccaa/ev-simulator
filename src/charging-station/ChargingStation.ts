@@ -1,7 +1,9 @@
 import { BootNotificationResponse, RegistrationStatus } from '../types/ocpp/Responses';
 import ChargingStationConfiguration, { ConfigurationKey } from '../types/ChargingStationConfiguration';
-import ChargingStationTemplate, { CurrentOutType, VoltageOut } from '../types/ChargingStationTemplate';
-import Connectors, { Connector } from '../types/Connectors';
+import ChargingStationTemplate, { CurrentType, PowerUnits, Voltage } from '../types/ChargingStationTemplate';
+import { ConnectorPhaseRotation, StandardParametersKey, SupportedFeatureProfiles } from '../types/ocpp/Configuration';
+import Connectors, { Connector, SampledValueTemplate } from '../types/Connectors';
+import { MeterValueMeasurand, MeterValuePhase } from '../types/ocpp/MeterValues';
 import { PerformanceObserver, performance } from 'perf_hooks';
 import Requests, { AvailabilityType, BootNotificationRequest, IncomingRequest, IncomingRequestCommand } from '../types/ocpp/Requests';
 import WebSocket, { MessageEvent } from 'ws';
@@ -14,7 +16,6 @@ import Configuration from '../utils/Configuration';
 import Constants from '../utils/Constants';
 import FileUtils from '../utils/FileUtils';
 import { MessageType } from '../types/ocpp/MessageType';
-import { MeterValueMeasurand } from '../types/ocpp/MeterValues';
 import OCPP16IncomingRequestService from './ocpp/1.6/OCCP16IncomingRequestService';
 import OCPP16RequestService from './ocpp/1.6/OCPP16RequestService';
 import OCPP16ResponseService from './ocpp/1.6/OCPP16ResponseService';
@@ -23,7 +24,6 @@ import OCPPIncomingRequestService from './ocpp/OCPPIncomingRequestService';
 import OCPPRequestService from './ocpp/OCPPRequestService';
 import { OCPPVersion } from '../types/ocpp/OCPPVersion';
 import PerformanceStatistics from '../utils/PerformanceStatistics';
-import { StandardParametersKey } from '../types/ocpp/Configuration';
 import { StopTransactionReason } from '../types/ocpp/Transaction';
 import Utils from '../utils/Utils';
 import { WebSocketCloseEventStatusCode } from '../types/WebSocket';
@@ -91,11 +91,15 @@ export default class ChargingStation {
     return !Utils.isUndefined(this.stationInfo.enableStatistics) ? this.stationInfo.enableStatistics : true;
   }
 
+  public getMayAuthorizeAtRemoteStart(): boolean | undefined {
+    return this.stationInfo.mayAuthorizeAtRemoteStart ?? true;
+  }
+
   public getNumberOfPhases(): number | undefined {
     switch (this.getCurrentOutType()) {
-      case CurrentOutType.AC:
+      case CurrentType.AC:
         return !Utils.isUndefined(this.stationInfo.numberOfPhases) ? this.stationInfo.numberOfPhases : 3;
-      case CurrentOutType.DC:
+      case CurrentType.DC:
         return 0;
     }
   }
@@ -120,19 +124,19 @@ export default class ChargingStation {
     return this.connectors[id];
   }
 
-  public getCurrentOutType(): CurrentOutType | undefined {
-    return !Utils.isUndefined(this.stationInfo.currentOutType) ? this.stationInfo.currentOutType : CurrentOutType.AC;
+  public getCurrentOutType(): CurrentType | undefined {
+    return this.stationInfo.currentOutType ?? CurrentType.AC;
   }
 
   public getVoltageOut(): number | undefined {
     const errMsg = `${this.logPrefix()} Unknown ${this.getCurrentOutType()} currentOutType in template file ${this.stationTemplateFile}, cannot define default voltage out`;
     let defaultVoltageOut: number;
     switch (this.getCurrentOutType()) {
-      case CurrentOutType.AC:
-        defaultVoltageOut = VoltageOut.VOLTAGE_230;
+      case CurrentType.AC:
+        defaultVoltageOut = Voltage.VOLTAGE_230;
         break;
-      case CurrentOutType.DC:
-        defaultVoltageOut = VoltageOut.VOLTAGE_400;
+      case CurrentType.DC:
+        defaultVoltageOut = Voltage.VOLTAGE_400;
         break;
       default:
         logger.error(errMsg);
@@ -144,17 +148,55 @@ export default class ChargingStation {
   public getTransactionIdTag(transactionId: number): string | undefined {
     for (const connector in this.connectors) {
       if (Utils.convertToInt(connector) > 0 && this.getConnector(Utils.convertToInt(connector)).transactionId === transactionId) {
-        return this.getConnector(Utils.convertToInt(connector)).idTag;
+        return this.getConnector(Utils.convertToInt(connector)).transactionIdTag;
       }
     }
   }
 
-  public getTransactionMeterStop(transactionId: number): number | undefined {
-    for (const connector in this.connectors) {
-      if (Utils.convertToInt(connector) > 0 && this.getConnector(Utils.convertToInt(connector)).transactionId === transactionId) {
-        return this.getConnector(Utils.convertToInt(connector)).lastEnergyActiveImportRegisterValue;
+  public getOutOfOrderEndMeterValues(): boolean {
+    return this.stationInfo.outOfOrderEndMeterValues ?? false;
+  }
+
+  public getBeginEndMeterValues(): boolean {
+    return this.stationInfo.beginEndMeterValues ?? false;
+  }
+
+  public getMeteringPerTransaction(): boolean {
+    return this.stationInfo.meteringPerTransaction ?? true;
+  }
+
+  public getTransactionDataMeterValues(): boolean {
+    return this.stationInfo.transactionDataMeterValues ?? false;
+  }
+
+  public getMainVoltageMeterValues(): boolean {
+    return this.stationInfo.mainVoltageMeterValues ?? true;
+  }
+
+  public getPhaseLineToLineVoltageMeterValues(): boolean {
+    return this.stationInfo.phaseLineToLineVoltageMeterValues ?? false;
+  }
+
+  public getEnergyActiveImportRegisterByTransactionId(transactionId: number): number | undefined {
+    if (this.getMeteringPerTransaction()) {
+      for (const connector in this.connectors) {
+        if (Utils.convertToInt(connector) > 0 && this.getConnector(Utils.convertToInt(connector)).transactionId === transactionId) {
+          return this.getConnector(Utils.convertToInt(connector)).transactionEnergyActiveImportRegisterValue;
+        }
       }
     }
+    for (const connector in this.connectors) {
+      if (Utils.convertToInt(connector) > 0 && this.getConnector(Utils.convertToInt(connector)).transactionId === transactionId) {
+        return this.getConnector(Utils.convertToInt(connector)).energyActiveImportRegisterValue;
+      }
+    }
+  }
+
+  public getEnergyActiveImportRegisterByConnectorId(connectorId: number): number | undefined {
+    if (this.getMeteringPerTransaction()) {
+      return this.getConnector(connectorId).transactionEnergyActiveImportRegisterValue;
+    }
+    return this.getConnector(connectorId).energyActiveImportRegisterValue;
   }
 
   public getAuthorizeRemoteTxRequests(): boolean {
@@ -172,6 +214,39 @@ export default class ChargingStation {
     this.stopWebSocketPing();
     // Start WebSocket ping
     this.startWebSocketPing();
+  }
+
+  public getSampledValueTemplate(connectorId: number, measurand: MeterValueMeasurand = MeterValueMeasurand.ENERGY_ACTIVE_IMPORT_REGISTER,
+      phase?: MeterValuePhase): SampledValueTemplate | undefined {
+    if (!Constants.SUPPORTED_MEASURANDS.includes(measurand)) {
+      logger.warn(`${this.logPrefix()} Trying to get unsupported MeterValues measurand ${measurand} ${phase ? `on phase ${phase} ` : ''}in template on connectorId ${connectorId}`);
+      return;
+    }
+    if (measurand !== MeterValueMeasurand.ENERGY_ACTIVE_IMPORT_REGISTER && !this.getConfigurationKey(StandardParametersKey.MeterValuesSampledData).value.includes(measurand)) {
+      logger.debug(`${this.logPrefix()} Trying to get MeterValues measurand ${measurand} ${phase ? `on phase ${phase} ` : ''}in template on connectorId ${connectorId} not found in '${StandardParametersKey.MeterValuesSampledData}' OCPP parameter`);
+      return;
+    }
+    const sampledValueTemplates: SampledValueTemplate[] = this.getConnector(connectorId).MeterValues;
+    for (let index = 0; !Utils.isEmptyArray(sampledValueTemplates) && index < sampledValueTemplates.length; index++) {
+      if (phase && sampledValueTemplates[index]?.phase === phase && sampledValueTemplates[index]?.measurand === measurand
+          && this.getConfigurationKey(StandardParametersKey.MeterValuesSampledData).value.includes(measurand)) {
+        return sampledValueTemplates[index];
+      } else if (!phase && !sampledValueTemplates[index].phase && sampledValueTemplates[index]?.measurand === measurand
+                 && this.getConfigurationKey(StandardParametersKey.MeterValuesSampledData).value.includes(measurand)) {
+        return sampledValueTemplates[index];
+      } else if (measurand === MeterValueMeasurand.ENERGY_ACTIVE_IMPORT_REGISTER
+                 && (!sampledValueTemplates[index].measurand || sampledValueTemplates[index].measurand === measurand)) {
+        return sampledValueTemplates[index];
+      }
+    }
+    if (measurand === MeterValueMeasurand.ENERGY_ACTIVE_IMPORT_REGISTER) {
+      logger.error(`${this.logPrefix()} Missing MeterValues for default measurand ${measurand} in template on connectorId ${connectorId}`);
+    }
+    logger.debug(`${this.logPrefix()} No MeterValues for measurand ${measurand} ${phase ? `on phase ${phase} ` : ''}in template on connectorId ${connectorId}`);
+  }
+
+  public getAutomaticTransactionGeneratorRequireAuthorize(): boolean {
+    return this.stationInfo.AutomaticTransactionGenerator.requireAuthorize ?? true;
   }
 
   public startHeartbeat(): void {
@@ -300,22 +375,28 @@ export default class ChargingStation {
     }
   }
 
-  public setChargingProfile(connectorId: number, cp: ChargingProfile): boolean {
+  public setChargingProfile(connectorId: number, cp: ChargingProfile): void {
+    let cpReplaced = false;
     if (!Utils.isEmptyArray(this.getConnector(connectorId).chargingProfiles)) {
       this.getConnector(connectorId).chargingProfiles?.forEach((chargingProfile: ChargingProfile, index: number) => {
         if (chargingProfile.chargingProfileId === cp.chargingProfileId
-          || (chargingProfile.stackLevel === cp.stackLevel && chargingProfile.chargingProfilePurpose === cp.chargingProfilePurpose)) {
+            || (chargingProfile.stackLevel === cp.stackLevel && chargingProfile.chargingProfilePurpose === cp.chargingProfilePurpose)) {
           this.getConnector(connectorId).chargingProfiles[index] = cp;
-          return true;
+          cpReplaced = true;
         }
       });
     }
-    this.getConnector(connectorId).chargingProfiles?.push(cp);
-    return true;
+    !cpReplaced && this.getConnector(connectorId).chargingProfiles?.push(cp);
   }
 
   public resetTransactionOnConnector(connectorId: number): void {
-    this.initTransactionOnConnector(connectorId);
+    this.getConnector(connectorId).authorized = false;
+    this.getConnector(connectorId).transactionStarted = false;
+    delete this.getConnector(connectorId).authorizeIdTag;
+    delete this.getConnector(connectorId).transactionId;
+    delete this.getConnector(connectorId).transactionIdTag;
+    this.getConnector(connectorId).transactionEnergyActiveImportRegisterValue = 0;
+    delete this.getConnector(connectorId).transactionBeginMeterValue;
     this.stopMeterValues(connectorId);
   }
 
@@ -346,9 +427,9 @@ export default class ChargingStation {
 
   private getChargingStationId(stationTemplate: ChargingStationTemplate): string {
     // In case of multiple instances: add instance index to charging station id
-    let instanceIndex = process.env.CF_INSTANCE_INDEX ? process.env.CF_INSTANCE_INDEX : 0;
+    let instanceIndex = process.env.CF_INSTANCE_INDEX ?? 0;
     instanceIndex = instanceIndex > 0 ? instanceIndex : '';
-    const idSuffix = stationTemplate.nameSuffix ? stationTemplate.nameSuffix : '';
+    const idSuffix = stationTemplate.nameSuffix ?? '';
     return stationTemplate.fixedName ? stationTemplate.baseName : stationTemplate.baseName + '-' + instanceIndex.toString() + ('000000000' + this.index.toString()).substr(('000000000' + this.index.toString()).length - 4) + idSuffix;
   }
 
@@ -362,13 +443,21 @@ export default class ChargingStation {
     } catch (error) {
       FileUtils.handleFileException(this.logPrefix(), 'Template', this.stationTemplateFile, error);
     }
-    const stationInfo: ChargingStationInfo = stationTemplateFromFile || {} as ChargingStationInfo;
+    const stationInfo: ChargingStationInfo = stationTemplateFromFile ?? {} as ChargingStationInfo;
     if (!Utils.isEmptyArray(stationTemplateFromFile.power)) {
       stationTemplateFromFile.power = stationTemplateFromFile.power as number[];
-      stationInfo.maxPower = stationTemplateFromFile.power[Math.floor(Math.random() * stationTemplateFromFile.power.length)];
+      const powerArrayRandomIndex = Math.floor(Math.random() * stationTemplateFromFile.power.length);
+      stationInfo.maxPower = stationTemplateFromFile.powerUnit === PowerUnits.KILO_WATT
+        ? stationTemplateFromFile.power[powerArrayRandomIndex] * 1000
+        : stationTemplateFromFile.power[powerArrayRandomIndex];
     } else {
-      stationInfo.maxPower = stationTemplateFromFile.power as number;
+      stationTemplateFromFile.power = stationTemplateFromFile.power as number;
+      stationInfo.maxPower = stationTemplateFromFile.powerUnit === PowerUnits.KILO_WATT
+        ? stationTemplateFromFile.power * 1000
+        : stationTemplateFromFile.power;
     }
+    delete stationInfo.power;
+    delete stationInfo.powerUnit;
     stationInfo.chargingStationId = this.getChargingStationId(stationTemplateFromFile);
     stationInfo.resetTime = stationTemplateFromFile.resetTime ? stationTemplateFromFile.resetTime * 1000 : Constants.CHARGING_STATION_DEFAULT_RESET_TIME;
     return stationInfo;
@@ -430,8 +519,8 @@ export default class ChargingStation {
       // Generate all connectors
       if ((this.stationInfo.Connectors[0] ? templateMaxConnectors - 1 : templateMaxConnectors) > 0) {
         for (let index = 1; index <= maxConnectors; index++) {
-          const randConnectorID = this.stationInfo.randomConnectors ? Utils.getRandomInt(Utils.convertToInt(lastConnector), 1) : index;
-          this.connectors[index] = Utils.cloneObject<Connector>(this.stationInfo.Connectors[randConnectorID]);
+          const randConnectorId = this.stationInfo.randomConnectors ? Utils.getRandomInt(Utils.convertToInt(lastConnector), 1) : index;
+          this.connectors[index] = Utils.cloneObject<Connector>(this.stationInfo.Connectors[randConnectorId]);
           this.connectors[index].availability = AvailabilityType.OPERATIVE;
           if (Utils.isUndefined(this.connectors[lastConnector]?.chargingProfiles)) {
             this.connectors[index].chargingProfiles = [];
@@ -444,7 +533,7 @@ export default class ChargingStation {
     // Initialize transaction attributes on connectors
     for (const connector in this.connectors) {
       if (Utils.convertToInt(connector) > 0 && !this.getConnector(Utils.convertToInt(connector)).transactionStarted) {
-        this.initTransactionOnConnector(Utils.convertToInt(connector));
+        this.initTransactionAttributesOnConnector(Utils.convertToInt(connector));
       }
     }
     switch (this.getOCPPVersion()) {
@@ -457,10 +546,7 @@ export default class ChargingStation {
         break;
     }
     // OCPP parameters
-    this.addConfigurationKey(StandardParametersKey.NumberOfConnectors, this.getNumberOfConnectors().toString(), true);
-    if (!this.getConfigurationKey(StandardParametersKey.MeterValuesSampledData)) {
-      this.addConfigurationKey(StandardParametersKey.MeterValuesSampledData, MeterValueMeasurand.ENERGY_ACTIVE_IMPORT_REGISTER);
-    }
+    this.initOCPPParameters();
     this.stationInfo.powerDivider = this.getPowerDivider();
     if (this.getEnableStatistics()) {
       this.performanceStatistics = new PerformanceStatistics(this.stationInfo.chargingStationId);
@@ -469,6 +555,43 @@ export default class ChargingStation {
         this.performanceStatistics.logPerformance(entry, Constants.ENTITY_CHARGING_STATION);
         this.performanceObserver.disconnect();
       });
+    }
+  }
+
+  private initOCPPParameters(): void {
+    if (!this.getConfigurationKey(StandardParametersKey.SupportedFeatureProfiles)) {
+      this.addConfigurationKey(StandardParametersKey.SupportedFeatureProfiles, `${SupportedFeatureProfiles.Core},${SupportedFeatureProfiles.Local_Auth_List_Management},${SupportedFeatureProfiles.Smart_Charging}`);
+    }
+    this.addConfigurationKey(StandardParametersKey.NumberOfConnectors, this.getNumberOfConnectors().toString(), true);
+    if (!this.getConfigurationKey(StandardParametersKey.MeterValuesSampledData)) {
+      this.addConfigurationKey(StandardParametersKey.MeterValuesSampledData, MeterValueMeasurand.ENERGY_ACTIVE_IMPORT_REGISTER);
+    }
+    if (!this.getConfigurationKey(StandardParametersKey.ConnectorPhaseRotation)) {
+      const connectorPhaseRotation = [];
+      for (const connector in this.connectors) {
+        // AC/DC
+        if (Utils.convertToInt(connector) === 0 && this.getNumberOfPhases() === 0) {
+          connectorPhaseRotation.push(`${connector}.${ConnectorPhaseRotation.RST}`);
+        } else if (Utils.convertToInt(connector) > 0 && this.getNumberOfPhases() === 0) {
+          connectorPhaseRotation.push(`${connector}.${ConnectorPhaseRotation.NotApplicable}`);
+        // AC
+        } else if (Utils.convertToInt(connector) > 0 && this.getNumberOfPhases() === 1) {
+          connectorPhaseRotation.push(`${connector}.${ConnectorPhaseRotation.NotApplicable}`);
+        } else if (Utils.convertToInt(connector) > 0 && this.getNumberOfPhases() === 3) {
+          connectorPhaseRotation.push(`${connector}.${ConnectorPhaseRotation.RST}`);
+        }
+      }
+      this.addConfigurationKey(StandardParametersKey.ConnectorPhaseRotation, connectorPhaseRotation.toString());
+    }
+    if (!this.getConfigurationKey(StandardParametersKey.AuthorizeRemoteTxRequests)) {
+      this.addConfigurationKey(StandardParametersKey.AuthorizeRemoteTxRequests, 'true');
+    }
+    if (!this.getConfigurationKey(StandardParametersKey.LocalAuthListEnabled)
+        && this.getConfigurationKey(StandardParametersKey.SupportedFeatureProfiles).value.includes(SupportedFeatureProfiles.Local_Auth_List_Management)) {
+      this.addConfigurationKey(StandardParametersKey.LocalAuthListEnabled, 'false');
+    }
+    if (!this.getConfigurationKey(StandardParametersKey.ConnectionTimeOut)) {
+      this.addConfigurationKey(StandardParametersKey.ConnectionTimeOut, Constants.DEFAULT_CONNECTION_TIMEOUT.toString());
     }
   }
 
@@ -522,7 +645,6 @@ export default class ChargingStation {
     try {
       // Parse the message
       [messageType, messageId, commandName, commandPayload, errorDetails] = JSON.parse(messageEvent.toString()) as IncomingRequest;
-
       // Check the Type of message
       switch (messageType) {
         // Incoming Message
@@ -586,7 +708,7 @@ export default class ChargingStation {
 
   private async onError(errorEvent: any): Promise<void> {
     logger.error(this.logPrefix() + ' Socket error: %j', errorEvent);
-    // pragma switch (errorEvent.code) {
+    // switch (errorEvent.code) {
     //   case 'ECONNREFUSED':
     //     await this._reconnect(errorEvent);
     //     break;
@@ -635,13 +757,10 @@ export default class ChargingStation {
 
   // 0 for disabling
   private getConnectionTimeout(): number | undefined {
-    if (!Utils.isUndefined(this.stationInfo.connectionTimeout)) {
-      return this.stationInfo.connectionTimeout;
+    if (this.getConfigurationKey(StandardParametersKey.ConnectionTimeOut)) {
+      return parseInt(this.getConfigurationKey(StandardParametersKey.ConnectionTimeOut).value) ?? Constants.DEFAULT_CONNECTION_TIMEOUT;
     }
-    if (!Utils.isUndefined(Configuration.getConnectionTimeout())) {
-      return Configuration.getConnectionTimeout();
-    }
-    return 30;
+    return Constants.DEFAULT_CONNECTION_TIMEOUT;
   }
 
   // -1 for unlimited, 0 for disabling
@@ -752,7 +871,8 @@ export default class ChargingStation {
       for (const connector in this.connectors) {
         if (Utils.convertToInt(connector) > 0 && this.getConnector(Utils.convertToInt(connector)).transactionStarted) {
           const transactionId = this.getConnector(Utils.convertToInt(connector)).transactionId;
-          await this.ocppRequestService.sendStopTransaction(transactionId, this.getTransactionMeterStop(transactionId), this.getTransactionIdTag(transactionId), reason);
+          await this.ocppRequestService.sendStopTransaction(transactionId, this.getEnergyActiveImportRegisterByTransactionId(transactionId),
+            this.getTransactionIdTag(transactionId), reason);
         }
       }
     }
@@ -843,7 +963,7 @@ export default class ChargingStation {
     const authorizationFile = this.getAuthorizationFile();
     if (authorizationFile) {
       try {
-        fs.watch(authorizationFile).on('change', (e) => {
+        fs.watch(authorizationFile).on('change', () => {
           try {
             logger.debug(this.logPrefix() + ' Authorization file ' + authorizationFile + ' have changed, reload');
             // Initialize authorizedTags
@@ -862,8 +982,8 @@ export default class ChargingStation {
 
   private startStationTemplateFileMonitoring(): void {
     try {
-    // eslint-disable-next-line @typescript-eslint/no-misused-promises
-      fs.watch(this.stationTemplateFile).on('change', async (e): Promise<void> => {
+      // eslint-disable-next-line @typescript-eslint/no-misused-promises
+      fs.watch(this.stationTemplateFile).on('change', async (): Promise<void> => {
         try {
           logger.debug(this.logPrefix() + ' Template file ' + this.stationTemplateFile + ' have changed, reload');
           // Initialize
@@ -912,11 +1032,11 @@ export default class ChargingStation {
     }
   }
 
-  private initTransactionOnConnector(connectorId: number): void {
+  private initTransactionAttributesOnConnector(connectorId: number): void {
+    this.getConnector(connectorId).authorized = false;
     this.getConnector(connectorId).transactionStarted = false;
-    delete this.getConnector(connectorId).transactionId;
-    delete this.getConnector(connectorId).idTag;
-    this.getConnector(connectorId).lastEnergyActiveImportRegisterValue = -1;
+    this.getConnector(connectorId).energyActiveImportRegisterValue = 0;
+    this.getConnector(connectorId).transactionEnergyActiveImportRegisterValue = 0;
   }
 }
 

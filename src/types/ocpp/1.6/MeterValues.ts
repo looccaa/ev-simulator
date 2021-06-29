@@ -61,7 +61,7 @@ export enum MeterValueLocation {
   OUTLET = 'Outlet'
 }
 
-export enum MeterValuePhase {
+export enum OCPP16MeterValuePhase {
   L1 = 'L1',
   L2 = 'L2',
   L3 = 'L3',
@@ -84,12 +84,12 @@ export interface OCPP16SampledValue {
   unit?: MeterValueUnit;
   context?: MeterValueContext;
   measurand?: OCPP16MeterValueMeasurand;
-  phase?: MeterValuePhase;
+  phase?: OCPP16MeterValuePhase;
   location?: MeterValueLocation;
   format?: MeterValueFormat;
 }
 
-export interface MeterValue {
+export interface OCPP16MeterValue {
   timestamp: string;
   sampledValue: OCPP16SampledValue[];
 }
@@ -97,9 +97,9 @@ export interface MeterValue {
 export interface MeterValuesRequest {
   connectorId: number;
   transactionId?: number;
-  meterValue: MeterValue | MeterValue[];
+  meterValue: OCPP16MeterValue | OCPP16MeterValue[];
 }
 
 // eslint-disable-next-line @typescript-eslint/no-empty-interface
-export interface MeterValuesResponse { }
+export interface MeterValuesResponse {}
 

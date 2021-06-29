@@ -4,6 +4,10 @@ import { WorkerProcessType } from '../types/Worker';
 import { v4 as uuid } from 'uuid';
 
 export default class Utils {
+  static logPrefix(prefixString = ''): string {
+    return new Date().toLocaleString() + prefixString;
+  }
+
   static generateUUID(): string {
     return uuid();
   }
@@ -121,8 +125,12 @@ export default class Utils {
     return Utils.roundTo(Utils.getRandomFloat(max), scale);
   }
 
-  static logPrefix(prefixString = ''): string {
-    return new Date().toLocaleString() + prefixString;
+  static getRandomFloatFluctuatedRounded(staticValue: number, fluctuationPercent: number, scale = 2): number {
+    if (fluctuationPercent === 0) {
+      return Utils.roundTo(staticValue, scale);
+    }
+    const fluctuationRatio = fluctuationPercent / 100;
+    return Utils.getRandomFloatRounded(staticValue * (1 + fluctuationRatio), staticValue * (1 - fluctuationRatio), scale);
   }
 
   static cloneObject<T>(object: T): T {

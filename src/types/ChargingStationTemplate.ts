@@ -3,7 +3,7 @@ import Connectors from './Connectors';
 import { OCPPProtocol } from './ocpp/OCPPProtocol';
 import { OCPPVersion } from './ocpp/OCPPVersion';
 
-export enum CurrentOutType {
+export enum CurrentType {
   AC = 'AC',
   DC = 'DC',
 }
@@ -13,10 +13,11 @@ export enum PowerUnits {
   KILO_WATT = 'kW',
 }
 
-export enum VoltageOut {
+export enum Voltage {
   VOLTAGE_110 = 110,
   VOLTAGE_230 = 230,
-  VOLTAGE_400 = 400
+  VOLTAGE_400 = 400,
+  VOLTAGE_800 = 800
 }
 
 export interface AutomaticTransactionGenerator {
@@ -28,7 +29,7 @@ export interface AutomaticTransactionGenerator {
   probabilityOfStart: number;
   stopAfterHours: number;
   stopOnConnectionFailure: boolean;
-  requireAuthorize: boolean
+  requireAuthorize?: boolean
 }
 
 export default interface ChargingStationTemplate {
@@ -46,18 +47,24 @@ export default interface ChargingStationTemplate {
   power: number | number[];
   powerSharedByConnectors?: boolean;
   powerUnit: PowerUnits;
-  currentOutType?: CurrentOutType;
+  currentOutType?: CurrentType;
+  voltageOut?: Voltage;
   numberOfPhases?: number;
   numberOfConnectors?: number | number[];
   useConnectorId0?: boolean;
   randomConnectors?: boolean;
   resetTime?: number;
-  connectionTimeout?: number;
   autoReconnectMaxRetries?: number;
   reconnectExponentialDelay?: boolean;
   registrationMaxRetries?: number;
   enableStatistics?: boolean;
-  voltageOut?: number;
+  mayAuthorizeAtRemoteStart: boolean;
+  beginEndMeterValues?: boolean;
+  outOfOrderEndMeterValues?: boolean;
+  meteringPerTransaction?: boolean;
+  transactionDataMeterValues?: boolean;
+  mainVoltageMeterValues?: boolean;
+  phaseLineToLineVoltageMeterValues?: boolean;
   Configuration?: ChargingStationConfiguration;
   AutomaticTransactionGenerator: AutomaticTransactionGenerator;
   Connectors: Connectors;

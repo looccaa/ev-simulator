@@ -21,16 +21,9 @@ export default class Configuration {
     return Configuration.objectHasOwnProperty(Configuration.getConfig(), 'statisticsDisplayInterval') ? Configuration.getConfig().statisticsDisplayInterval : 60;
   }
 
-  static getConnectionTimeout(): number {
-    Configuration.deprecateConfigurationKey('autoReconnectTimeout', 'Use \'connectionTimeout\' in charging station instead');
-    Configuration.deprecateConfigurationKey('connectionTimeout', 'Use it in charging station template instead');
-    // Read conf
-    if (Configuration.objectHasOwnProperty(Configuration.getConfig(), 'connectionTimeout')) {
-      return Configuration.getConfig().connectionTimeout;
-    }
-  }
-
   static getAutoReconnectMaxRetries(): number {
+    Configuration.deprecateConfigurationKey('autoReconnectTimeout', 'Use \'ConnectionTimeOut\' OCPP parameter in charging station template instead');
+    Configuration.deprecateConfigurationKey('connectionTimeout', 'Use \'ConnectionTimeOut\' OCPP parameter in charging station template instead');
     Configuration.deprecateConfigurationKey('autoReconnectMaxRetries', 'Use it in charging station template instead');
     // Read conf
     if (Configuration.objectHasOwnProperty(Configuration.getConfig(), 'autoReconnectMaxRetries')) {
@@ -141,8 +134,8 @@ export default class Configuration {
 
   private static getConfigurationFileWatcher(): fs.FSWatcher {
     try {
-    // eslint-disable-next-line @typescript-eslint/no-misused-promises
-      return fs.watch(Configuration.configurationFilePath).on('change', async (e): Promise<void> => {
+      // eslint-disable-next-line @typescript-eslint/no-misused-promises
+      return fs.watch(Configuration.configurationFilePath).on('change', async (): Promise<void> => {
         // Nullify to force configuration file reading
         Configuration.configuration = null;
         if (!Configuration.isUndefined(Configuration.configurationChangeCallback)) {
